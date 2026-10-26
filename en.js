@@ -1,11 +1,11 @@
-/* NEIS Leave Request Helper (English) v1.3  — based on 근무상황 신청 도우미 v2.1
+/* NEIS Leave Request Helper (English) v1.4  — based on 근무상황 신청 도우미 v2.1
  * 복무 > 개인근무상황관리 > 신청 → fill → 승인요청 → approval line → 상신
  * Default: stops at the "상신하겠습니까?" confirm box. "Submit directly" clicks 확인 too (asks first).
  * Settings are saved in this browser only when "Remember on this PC" is checked.
  */
 (function () {
   'use strict';
-  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1';
+  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.4';
 
   /* Approver choices come from the bookmark (window.NEIS_LEAVE_CFG), so no names live in this public file.
    * e.g. { reviewers:[{name:'홍길동',role:'Teacher',on:true}], finals:[{name:'김교장',role:'Principal',on:true}] } */
@@ -14,7 +14,8 @@
   var REVIEWERS = normList(CFG0.reviewers), FINALS = normList(CFG0.finals);
 
   var old = document.getElementById(PANEL_ID);
-  if (old) { old.style.display = 'block'; return; }
+  if (old && old.getAttribute('data-ver') === VER) { old.style.display = 'block'; return; }
+  if (old) old.remove();   // an older version was open in this tab: replace it
   if (!window.cpr || !cpr.core) { alert('Please run this on the NEIS (4th gen) page.'); return; }
 
   var TYPES = [
@@ -92,7 +93,8 @@
     if (hookOn) return; hookOn = true; userCancelled = '';
     window.confirm = function (msg) {
       var m = String(msg || '');
-      if (/금년도연가/.test(m) && /초과일수/.test(m) && /신청하시겠습니까/.test(m)) {
+      var mm = m.replace(/\s+/g, '');
+      if (/연가/.test(mm) && /초과/.test(mm) && /신청하시겠습니까/.test(mm)) {
         var have = (m.match(/신청할 수 있는 금년도연가는\s*([^\n.]+?)입니다/) || [])[1] || '';
         var req = (m.match(/금년도연가 합산은\s*([^\n.]+?)입니다/) || [])[1] || '';
         logFn('   NEIS notice auto-confirmed: annual leave left ' + have + ', requested ' + req + ' → counted as excess leave (초과일수).');
@@ -138,9 +140,9 @@
     }).join('');
   }
   var now = new Date(), today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
-  var p = document.createElement('div'); p.id = PANEL_ID;
+  var p = document.createElement('div'); p.id = PANEL_ID; p.setAttribute('data-ver', VER);
   p.innerHTML =
-    '<div class="hd"><span>NEIS Leave Request Helper</span><span><button data-k="fold" title="Fold">–</button><button data-k="x" title="Close">×</button></span></div>' +
+    '<div class="hd"><span>NEIS Leave Request Helper <small style="font-weight:normal;opacity:.8">' + VER + '</small></span><span><button data-k="fold" title="Fold">–</button><button data-k="x" title="Close">×</button></span></div>' +
     '<div class="bd">' +
     '<div class="sec"><h4>My settings <a data-k="edit" style="display:none">Edit</a></h4>' +
     '<div data-k="sum" class="sum" style="display:none"></div>' +
@@ -187,7 +189,7 @@
   var logEl = p.querySelector('.log'), goBtn = p.querySelector('.go');
   function log(m) { logEl.style.display = 'block'; q('copy').style.display = 'inline-block'; logEl.textContent += m + '\n'; logEl.scrollTop = 1e6; }
   q('copy').onclick = function () {
-    var t = '[NEIS Leave Helper EN v1.2] ' + new Date().toLocaleString() + '\n' + logEl.textContent.replace(/01\d{8,9}/g, '010********');
+    var t = '[NEIS Leave Helper EN ' + VER + '] ' + new Date().toLocaleString() + '\n' + logEl.textContent.replace(/01\d{8,9}/g, '010********');
     (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { q('copy').textContent = 'Copied!'; setTimeout(function () { q('copy').textContent = 'Copy log'; }, 1500); },
       function () { var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); q('copy').textContent = 'Copied!'; });
   };
