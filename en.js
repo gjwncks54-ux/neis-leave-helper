@@ -1,11 +1,11 @@
-/* NEIS Leave Request Helper (English) v1.4  — based on 근무상황 신청 도우미 v2.1
+/* NEIS Leave Request Helper (English) v1.5  — based on 근무상황 신청 도우미 v2.1
  * 복무 > 개인근무상황관리 > 신청 → fill → 승인요청 → approval line → 상신
  * Default: stops at the "상신하겠습니까?" confirm box. "Submit directly" clicks 확인 too (asks first).
  * Settings are saved in this browser only when "Remember on this PC" is checked.
  */
 (function () {
   'use strict';
-  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.4';
+  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.5';
 
   /* Approver choices come from the bookmark (window.NEIS_LEAVE_CFG), so no names live in this public file.
    * e.g. { reviewers:[{name:'홍길동',role:'Teacher',on:true}], finals:[{name:'김교장',role:'Principal',on:true}] } */
@@ -54,6 +54,8 @@
   function app(part) { return apps().filter(function (a) { return a.id.indexOf(part) >= 0; })[0]; }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function readAlert() {
+    var al = apps().filter(function (x) { return x.id.indexOf('app/cmn/alert') === 0; })[0];
+    if (al) { var o = al.lookup('optMsg'); var t0 = (o && o.value) || ''; if (!t0) { var d0 = document.querySelector('.cl-dialog.modal-msg'); t0 = d0 ? d0.innerText.replace(/\s+/g, ' ').trim() : 'NEIS message'; } return String(t0).replace(/\s+/g, ' ').trim(); }
     var els = document.querySelectorAll('.cl-dialog.modal-msg');
     for (var i = 0; i < els.length; i++) {
       var t = els[i].innerText.replace(/\s+/g, ' ').trim();
@@ -88,13 +90,18 @@
   /* NEIS sometimes asks with a native browser confirm(). While the helper runs:
    * - the known "excess annual leave" notice is auto-confirmed (natives' leave does not reset yearly)
    * - any other question is shown with an English note; Cancel stops the helper */
-  var nativeConfirm = window.confirm, hookOn = false, userCancelled = '';
+  var nativeConfirm = window.confirm, hookOn = false, userCancelled = '', stage = '';
   function hookConfirm(logFn) {
     if (hookOn) return; hookOn = true; userCancelled = '';
     window.confirm = function (msg) {
       var m = String(msg || '');
       var mm = m.replace(/\s+/g, '');
-      if (/연가/.test(mm) && /초과/.test(mm) && /신청하시겠습니까/.test(mm)) {
+      if (stage === 'aprv' && !(/연가/.test(mm) && /초과/.test(mm))) {
+        // NEIS text can be a bare code or English depending on the PC language; any question while requesting approval is the leave-balance notice
+        logFn('   NEIS question auto-confirmed during request approval: ' + m.replace(/\s+/g, ' '));
+        return true;
+      }
+      if (/연가/.test(mm) && /초과/.test(mm)) {
         var have = (m.match(/신청할 수 있는 금년도연가는\s*([^\n.]+?)입니다/) || [])[1] || '';
         var req = (m.match(/금년도연가 합산은\s*([^\n.]+?)입니다/) || [])[1] || '';
         logFn('   NEIS notice auto-confirmed: annual leave left ' + have + ', requested ' + req + ' → counted as excess leave (초과일수).');
@@ -106,7 +113,7 @@
       return ok;
     };
   }
-  function unhookConfirm() { if (hookOn) { window.confirm = nativeConfirm; hookOn = false; } }
+  function unhookConfirm() { stage = ''; if (hookOn) { window.confirm = nativeConfirm; hookOn = false; } }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function ymd(v) { return v.replace(/-/g, ''); }
 
@@ -457,6 +464,7 @@
     log('   Requested time: ' + g('workSittnDdTtl') + ' day(s) ' + g('workSittnHrTtl') + ' h ' + g('workSittnMTtl') + ' min');
 
     log('3/6 승인요청 (request approval)...');
+    stage = 'aprv';
     P.lookup('btnAprvDmnd').click();
     var A = null, lastAlert = '', endA = Date.now() + 20000, alerts = 0;
     var lastA = Date.now();
@@ -474,6 +482,7 @@
       }
       await sleep(200);
     }
+    stage = '';
     if (!A) throw new Error(lastAlert ? 'NEIS blocked the request. See the message above (ask a Korean colleague if needed).' : 'Timed out waiting for the 기안문서상신 window.');
     await sleep(1500);
 
@@ -485,11 +494,11 @@
     log('   Approval line: ' + line.join(' → '));
 
     log('6/6 Clicking 상신 (submit)...');
-    for (var t2 = 1; t2 <= 3 && !confirmShown('상신하'); t2++) {
+    for (var t2 = 1; t2 <= 3 && !(confirmShown('상신하') || !!app('app/cmn/confirm')); t2++) {
       app('wam_woapm07_p00').lookup('btnDrft').click();
-      await waitFor(function () { return confirmShown('상신하'); }, 7000, '').catch(function (e) { if (/NEIS/.test(e.message)) throw e; });
+      await waitFor(function () { return (confirmShown('상신하') || !!app('app/cmn/confirm')); }, 7000, '').catch(function (e) { if (/NEIS/.test(e.message)) throw e; });
     }
-    await waitFor(function () { return confirmShown('상신하'); }, 15000, 'submit confirm box');
+    await waitFor(function () { return (confirmShown('상신하') || !!app('app/cmn/confirm')); }, 15000, 'submit confirm box');
     if (!autoSubmit) {
       log('\nDone! Stopped at the "상신하겠습니까?" confirm box.\nCheck the details and click [확인] (OK) yourself.\n(If you click 취소 (Cancel), a draft (임시저장) stays in the list. Please delete it.)');
       return;
