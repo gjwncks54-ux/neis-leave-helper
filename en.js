@@ -1,11 +1,11 @@
-/* NEIS Leave Request Helper (English) v1.7  — based on 근무상황 신청 도우미 v2.1
+/* NEIS Leave Request Helper (English) v1.8  — based on 근무상황 신청 도우미 v2.1
  * 복무 > 개인근무상황관리 > 신청 → fill → 승인요청 → approval line → 상신
  * Default: stops at the "상신하겠습니까?" confirm box. "Submit directly" clicks 확인 too (asks first).
  * Settings are saved in this browser only when "Remember on this PC" is checked.
  */
 (function () {
   'use strict';
-  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.7';
+  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.8';
 
   /* Approver choices come from the bookmark (window.NEIS_LEAVE_CFG), so no names live in this public file.
    * e.g. { reviewers:[{name:'홍길동',role:'Teacher',on:true}], finals:[{name:'김교장',role:'Principal',on:true}] } */
@@ -43,6 +43,7 @@
     ['08', 'No.8: Child\'s military enlistment day'],
     ['09', 'No.9: Other reason approved by the principal']
   ];
+  var DEST_TYPES = ['W0301', 'W0801', 'W9999'];   // NEIS shows a 목적지 field for these
   var KIND_CODE = { '결재': '2', '검토': '7' };
   var WORK_START = '08:30', WORK_END = '16:30';
 
@@ -184,6 +185,7 @@
     '<label class="t">Time <span class="hint">(5-minute steps)</span></label><div class="row"><input type="time" step="300" data-k="t1" value="13:00"><span>~</span><input type="time" step="300" data-k="t2" value="' + WORK_END + '"></div>' +
     '<div data-k="avbox" style="display:none"><label class="t">Annual leave reason</label><select data-k="av">' + AV_RSN.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + '</option>'; }).join('') + '</select></div>' +
     '<div data-k="rsnbox"><label class="t">Reason</label><input type="text" data-k="rsn" placeholder="e.g. Hospital visit"></div>' +
+    '<div data-k="destbox" style="display:none"><label class="t">Destination (목적지) <span class="hint">optional</span></label><input type="text" data-k="dest" placeholder="e.g. 서울시교육연수원"></div>' +
     '</div>' +
     '<div class="row" style="margin-top:10px">' +
     '<label class="inl"><input type="radio" name="gmen-fin" value="stop" checked> Stop at confirm box</label>' +
@@ -278,6 +280,7 @@
   function refreshType() {
     var ty = TYPES[q('type').value], isAv = ty[1] === 'W0101' || ty[1] === 'W0102';
     q('avbox').style.display = isAv ? 'block' : 'none'; q('rsnbox').style.display = isAv ? 'none' : 'block';
+    q('destbox').style.display = DEST_TYPES.indexOf(ty[1]) >= 0 ? 'block' : 'none';
     if (ty[3]) { q('t1').value = WORK_START; q('t2').value = WORK_END; }
   }
   q('type').onchange = refreshType;
@@ -465,6 +468,8 @@
     P.lookup('cmbEndH').putValue(h2); P.lookup('cmbEndM').putValue(m2);
     P.lookup('mse1').putValue(cfg.phone);
     if (isAv) P.lookup('cmbAvRsnCd').selectItemByValue(av); else P.lookup('ipbWorkSittnRsnCn').putValue(rsn);
+    var dest = DEST_TYPES.indexOf(ty[1]) >= 0 ? q('dest').value.trim() : '';
+    if (dest && P.lookup('ipbDestiNm')) P.lookup('ipbDestiNm').putValue(dest);
     P.lookup('cbxPrdYn').putValue(cfg.hidePeriod ? 'Y' : 'N');
     P.lookup('cbxWorkSittnRsnCnYn').putValue(cfg.hideReason ? 'Y' : 'N');
     await sleep(1200);
@@ -473,6 +478,7 @@
     if (g('bgngYmd') !== ymd(d1) || g('endYmd') !== ymd(d2)) bad.push('date');
     if (g('bgngH') !== h1 || g('bgngM') !== m1 || g('endH') !== h2 || g('endM') !== m2) bad.push('time');
     if (isAv ? g('avRsnCd') !== av : g('workSittnRsnCn') !== rsn) bad.push('reason');
+    if (dest && D.getValue(0, 'destiNm') !== dest) bad.push('destination');
     if (bad.length) throw new Error('Input check failed: ' + bad.join(', '));
     log('   Requested time: ' + g('workSittnDdTtl') + ' day(s) ' + g('workSittnHrTtl') + ' h ' + g('workSittnMTtl') + ' min');
 

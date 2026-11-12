@@ -1,4 +1,4 @@
-/* 나이스 근무상황 신청 도우미 v2.3
+/* 나이스 근무상황 신청 도우미 v2.4
  * 복무 > 개인근무상황관리 > 신청 → 입력 → 승인요청 → 결재선 지정 → 상신
  * 기본: "상신하겠습니까?" 확인창에서 멈춤. '바로 상신'을 고르면 확인까지 누름(매번 선택).
  * 설정(연락처, 결재선, 비공개)은 '이 PC에 기억하기'를 켰을 때만 이 브라우저에 저장.
@@ -28,6 +28,7 @@
     ['05', '5호: 방송대 출석수업, 대학원 시험'], ['06', '6호: 본인·배우자 부모의 형제자매 장례'],
     ['07', '7호: 본인·배우자 형제자매의 배우자 장례'], ['08', '8호: 자녀 입영일'], ['09', '9호: 기타 학교장 인정']
   ];
+  var DEST_TYPES = ['W0301', 'W0801', 'W9999'];   // NEIS shows a 목적지 field for these
   var KIND_CODE = { '결재': '2', '검토': '7' };
   var WORK_START = '08:30', WORK_END = '16:30';
 
@@ -134,6 +135,7 @@
     '<label class="t">시간 <span class="hint">(5분 단위)</span></label><div class="row"><input type="time" step="300" data-k="t1" value="13:00"><span>~</span><input type="time" step="300" data-k="t2" value="' + WORK_END + '"></div>' +
     '<div data-k="avbox" style="display:none"><label class="t">연가사유</label><select data-k="av">' + AV_RSN.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + '</option>'; }).join('') + '</select></div>' +
     '<div data-k="rsnbox"><label class="t">사유</label><input type="text" data-k="rsn" placeholder="예: 병원진료"></div>' +
+    '<div data-k="destbox" style="display:none"><label class="t">목적지 <span class="hint">(선택)</span></label><input type="text" data-k="dest" placeholder="예: 서울시교육연수원"></div>' +
     '</div>' +
     '<div class="row" style="margin-top:10px">' +
     '<label class="inl"><input type="radio" name="gm-fin" value="stop" checked> 확인창에서 멈춤</label>' +
@@ -205,6 +207,7 @@
   function refreshType() {
     var ty = TYPES[q('type').value], isAv = ty[1] === 'W0101' || ty[1] === 'W0102';
     q('avbox').style.display = isAv ? 'block' : 'none'; q('rsnbox').style.display = isAv ? 'none' : 'block';
+    q('destbox').style.display = DEST_TYPES.indexOf(ty[1]) >= 0 ? 'block' : 'none';
     if (ty[3]) { q('t1').value = WORK_START; q('t2').value = WORK_END; }
   }
   q('type').onchange = refreshType;
@@ -411,6 +414,8 @@
     P.lookup('cmbEndH').putValue(h2); P.lookup('cmbEndM').putValue(m2);
     P.lookup('mse1').putValue(cfg.phone);
     if (isAv) P.lookup('cmbAvRsnCd').selectItemByValue(av); else P.lookup('ipbWorkSittnRsnCn').putValue(rsn);
+    var dest = DEST_TYPES.indexOf(ty[1]) >= 0 ? q('dest').value.trim() : '';
+    if (dest && P.lookup('ipbDestiNm')) P.lookup('ipbDestiNm').putValue(dest);
     P.lookup('cbxPrdYn').putValue(cfg.hidePeriod ? 'Y' : 'N');
     P.lookup('cbxWorkSittnRsnCnYn').putValue(cfg.hideReason ? 'Y' : 'N');
     await sleep(1200);
@@ -419,6 +424,7 @@
     if (g('bgngYmd') !== ymd(d1) || g('endYmd') !== ymd(d2)) bad.push('날짜');
     if (g('bgngH') !== h1 || g('bgngM') !== m1 || g('endH') !== h2 || g('endM') !== m2) bad.push('시간');
     if (isAv ? g('avRsnCd') !== av : g('workSittnRsnCn') !== rsn) bad.push('사유');
+    if (dest && D.getValue(0, 'destiNm') !== dest) bad.push('목적지');
     if (bad.length) throw new Error('입력 확인 실패: ' + bad.join(', '));
     log('   신청시간 ' + g('workSittnDdTtl') + '일 ' + g('workSittnHrTtl') + '시간 ' + g('workSittnMTtl') + '분');
 
