@@ -1,4 +1,4 @@
-/* 나이스 근무상황 신청 도우미 v2.2
+/* 나이스 근무상황 신청 도우미 v2.3
  * 복무 > 개인근무상황관리 > 신청 → 입력 → 승인요청 → 결재선 지정 → 상신
  * 기본: "상신하겠습니까?" 확인창에서 멈춤. '바로 상신'을 고르면 확인까지 누름(매번 선택).
  * 설정(연락처, 결재선, 비공개)은 '이 PC에 기억하기'를 켰을 때만 이 브라우저에 저장.
@@ -11,10 +11,16 @@
   if (!window.cpr || !cpr.core) { alert('나이스(4세대) 화면에서 실행해 주세요.'); return; }
 
   var TYPES = [
-    ['W01', 'W0104', '연가 / 조퇴'], ['W01', 'W0101', '연가 / 연가'], ['W01', 'W0102', '연가 / 반일연가'],
+    ['W01', 'W0104', '연가 / 조퇴'], ['W01', 'W0101', '연가 / 연가', 1], ['W01', 'W0102', '연가 / 반일연가'],
     ['W01', 'W0105', '연가 / 외출'], ['W01', 'W0103', '연가 / 지각'],
-    ['W02', 'W0205', '병가 / 병조퇴'], ['W02', 'W0201', '병가 / 병가'], ['W02', 'W0203', '병가 / 반일병가'],
-    ['W02', 'W0206', '병가 / 병외출'], ['W02', 'W0204', '병가 / 병지각']
+    ['W02', 'W0205', '병가 / 병조퇴'], ['W02', 'W0201', '병가 / 병가', 1], ['W02', 'W0203', '병가 / 반일병가'],
+    ['W02', 'W0206', '병가 / 병외출'], ['W02', 'W0204', '병가 / 병지각'], ['W02', 'W0202', '병가 / 공무상병가', 1],
+    ['W03', 'W0301', '공가 / 공가', 1],
+    ['W04', 'W0403', '특별휴가 / 경조사휴가', 1], ['W04', 'W0409', '특별휴가 / 포상휴가', 1],
+    ['W04', 'W0406', '특별휴가 / 여성보건휴가', 1], ['W04', 'W0414', '특별휴가 / 임신검진휴가', 1],
+    ['W04', 'W0408', '특별휴가 / 수업휴가', 1], ['W04', 'W0498', '특별휴가 / 기타특별휴가', 1],
+    ['W08', 'W0801', '연수 / 교육공무원법제41조연수', 1],
+    ['W99', 'W9999', '기타 / 기타', 1]
   ];
   var AV_RSN = [
     ['01', '1호: 본인·배우자 직계존속 생일'], ['02', '2호: 배우자, 본인·배우자 직계존속 기일'],
@@ -199,7 +205,7 @@
   function refreshType() {
     var ty = TYPES[q('type').value], isAv = ty[1] === 'W0101' || ty[1] === 'W0102';
     q('avbox').style.display = isAv ? 'block' : 'none'; q('rsnbox').style.display = isAv ? 'none' : 'block';
-    if (ty[1] === 'W0101') { q('t1').value = WORK_START; q('t2').value = WORK_END; }
+    if (ty[3]) { q('t1').value = WORK_START; q('t2').value = WORK_END; }
   }
   q('type').onchange = refreshType;
   q('d1').onchange = function () { if (q('d2').value < q('d1').value) q('d2').value = q('d1').value; };
@@ -393,6 +399,13 @@
     log('2/6 입력 중: ' + ty[2]);
     await selectCombo(P.lookup('cmbWorkSittnLclfCd'), ty[0]);
     await selectCombo(P.lookup('cmbWorkSittnSclfCd'), ty[1]);
+    for (var nn = 0; nn < 5; nn++) {
+      await sleep(400);
+      var nm = readAlert(); if (!nm) break;
+      log('   안내: ' + nm);
+      dismissAlert(); await sleep(500);
+      if (/대상자가 아닙니다|대상자가 아님/.test(nm)) throw new Error('신청 대상이 아니라고 나와요: ' + nm);
+    }
     P.lookup('dtiWorkYmdFrom').putValue(ymd(d1)); P.lookup('dtiWorkYmdTo').putValue(ymd(d2));
     P.lookup('cmbBgngH').putValue(h1); P.lookup('cmbBgngM').putValue(m1);
     P.lookup('cmbEndH').putValue(h2); P.lookup('cmbEndM').putValue(m2);
