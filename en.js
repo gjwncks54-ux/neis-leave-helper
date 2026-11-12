@@ -1,11 +1,11 @@
-/* NEIS Leave Request Helper (English) v1.6  — based on 근무상황 신청 도우미 v2.1
+/* NEIS Leave Request Helper (English) v1.7  — based on 근무상황 신청 도우미 v2.1
  * 복무 > 개인근무상황관리 > 신청 → fill → 승인요청 → approval line → 상신
  * Default: stops at the "상신하겠습니까?" confirm box. "Submit directly" clicks 확인 too (asks first).
  * Settings are saved in this browser only when "Remember on this PC" is checked.
  */
 (function () {
   'use strict';
-  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.6';
+  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.7';
 
   /* Approver choices come from the bookmark (window.NEIS_LEAVE_CFG), so no names live in this public file.
    * e.g. { reviewers:[{name:'홍길동',role:'Teacher',on:true}], finals:[{name:'김교장',role:'Principal',on:true}] } */
@@ -28,7 +28,8 @@
     ['W03', 'W0301', 'Official leave (공가)', 1],
     ['W04', 'W0403', 'Special leave / Family event (경조사휴가)', 1], ['W04', 'W0409', 'Special leave / Reward (포상휴가)', 1],
     ['W04', 'W0406', 'Special leave / Women\'s health (여성보건휴가)', 1], ['W04', 'W0414', 'Special leave / Pregnancy check-up (임신검진휴가)', 1],
-    ['W04', 'W0498', 'Special leave / Other (기타특별휴가)', 1],
+    ['W04', 'W0408', 'Special leave / Class-related (수업휴가)', 1], ['W04', 'W0498', 'Special leave / Other (기타특별휴가)', 1],
+    ['W08', 'W0801', 'Training / Article 41 training (교육공무원법제41조연수)', 1],
     ['W99', 'W9999', 'Other (기타)', 1]
   ];
   var AV_RSN = [
@@ -97,6 +98,10 @@
     window.confirm = function (msg) {
       var m = String(msg || '');
       var mm = m.replace(/\s+/g, '');
+      if (stage === 'aprv' && /교원만신청가능/.test(mm)) {
+        logFn('   NEIS notice auto-confirmed: "This training/leave type is normally for 교원 (certified teachers). Apply anyway?" → OK');
+        return true;
+      }
       if (stage === 'aprv' && !(/연가/.test(mm) && /초과/.test(mm))) {
         // NEIS text can be a bare code or English depending on the PC language; any question while requesting approval is the leave-balance notice
         logFn('   NEIS question auto-confirmed during request approval: ' + m.replace(/\s+/g, ' '));
