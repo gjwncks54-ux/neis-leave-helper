@@ -1,11 +1,11 @@
-/* NEIS Leave Request Helper (English) v1.9  — based on 근무상황 신청 도우미 v2.1
+/* NEIS Leave Request Helper (English) v1.10  — based on 근무상황 신청 도우미 v2.1
  * 복무 > 개인근무상황관리 > 신청 → fill → 승인요청 → approval line → 상신
  * Default: stops at the "상신하겠습니까?" confirm box. "Submit directly" clicks 확인 too (asks first).
  * Settings are saved in this browser only when "Remember on this PC" is checked.
  */
 (function () {
   'use strict';
-  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.9';
+  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.10';
 
   /* Approver choices come from the bookmark (window.NEIS_LEAVE_CFG), so no names live in this public file.
    * e.g. { reviewers:[{name:'홍길동',role:'Teacher',on:true}], finals:[{name:'김교장',role:'Principal',on:true}] } */
@@ -183,7 +183,7 @@
     '<div class="sec"><h4>This request</h4>' +
     '<label class="t">Leave type</label><select data-k="type">' + TYPES.map(function (x, i) { return '<option value="' + i + '">' + x[2] + '</option>'; }).join('') + '</select>' +
     '<label class="t">Date</label><div class="row"><input type="date" data-k="d1" value="' + today + '"><span>~</span><input type="date" data-k="d2" value="' + today + '"></div>' +
-    '<label class="inl" style="display:block;margin-top:4px"><input type="checkbox" data-k="split" checked> Skip weekends, holidays and school closure days</label><div data-k="plan" class="plan"></div>' +
+    '<label class="inl" style="display:block;margin-top:4px"><input type="checkbox" data-k="split"> <b>Vacation mode</b> <span class="hint">split into rows, skipping weekends, holidays and school closure days</span></label><div data-k="plan" class="plan"></div>' +
     '<label class="t">Time <span class="hint">(5-minute steps)</span></label><div class="row"><input type="time" step="300" data-k="t1" value="13:00"><span>~</span><input type="time" step="300" data-k="t2" value="' + WORK_END + '"></div>' +
     '<div data-k="avbox" style="display:none"><label class="t">Annual leave reason</label><select data-k="av">' + AV_RSN.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + '</option>'; }).join('') + '</select></div>' +
     '<div data-k="rsnbox"><label class="t">Reason</label><input type="text" data-k="rsn" placeholder="e.g. Hospital visit"></div>' +

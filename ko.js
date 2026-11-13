@@ -1,4 +1,4 @@
-/* 나이스 근무상황 신청 도우미 v2.5
+/* 나이스 근무상황 신청 도우미 v2.6
  * 복무 > 개인근무상황관리 > 신청 → 입력 → 승인요청 → 결재선 지정 → 상신
  * 기본: "상신하겠습니까?" 확인창에서 멈춤. '바로 상신'을 고르면 확인까지 누름(매번 선택).
  * 설정(연락처, 결재선, 비공개)은 '이 PC에 기억하기'를 켰을 때만 이 브라우저에 저장.
@@ -133,7 +133,7 @@
     '<div class="sec"><h4>이번 신청</h4>' +
     '<label class="t">근무상황</label><select data-k="type">' + TYPES.map(function (x, i) { return '<option value="' + i + '">' + x[2] + '</option>'; }).join('') + '</select>' +
     '<label class="t">날짜</label><div class="row"><input type="date" data-k="d1" value="' + today + '"><span>~</span><input type="date" data-k="d2" value="' + today + '"></div>' +
-    '<label class="inl" style="display:block;margin-top:4px"><input type="checkbox" data-k="split" checked> 주말·공휴일·휴업일 빼고 나누기</label><div data-k="plan" class="plan"></div>' +
+    '<label class="inl" style="display:block;margin-top:4px"><input type="checkbox" data-k="split"> <b>방학용</b> <span class="hint">주말·공휴일·휴업일 빼고 행을 나눠서 신청</span></label><div data-k="plan" class="plan"></div>' +
     '<label class="t">시간 <span class="hint">(5분 단위)</span></label><div class="row"><input type="time" step="300" data-k="t1" value="13:00"><span>~</span><input type="time" step="300" data-k="t2" value="' + WORK_END + '"></div>' +
     '<div data-k="avbox" style="display:none"><label class="t">연가사유</label><select data-k="av">' + AV_RSN.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + '</option>'; }).join('') + '</select></div>' +
     '<div data-k="rsnbox"><label class="t">사유</label><input type="text" data-k="rsn" placeholder="예: 병원진료"></div>' +
