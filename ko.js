@@ -1,4 +1,4 @@
-/* 나이스 근무상황 신청 도우미 v2.4
+/* 나이스 근무상황 신청 도우미 v2.5
  * 복무 > 개인근무상황관리 > 신청 → 입력 → 승인요청 → 결재선 지정 → 상신
  * 기본: "상신하겠습니까?" 확인창에서 멈춤. '바로 상신'을 고르면 확인까지 누름(매번 선택).
  * 설정(연락처, 결재선, 비공개)은 '이 PC에 기억하기'를 켰을 때만 이 브라우저에 저장.
@@ -95,6 +95,7 @@
     P_ + ' .go{margin-top:10px;width:100%;padding:8px;background:#2b5fd9;color:#fff;border:0;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer}' +
     P_ + ' .go:disabled{background:#999}' +
     P_ + ' .sm{padding:2px 8px;font-size:12px;border:1px solid #bbb;background:#fff;border-radius:4px;cursor:pointer}' +
+    P_ + ' .plan{margin-top:4px;font-size:12px}' + P_ + ' .plan .ch{display:inline-block;margin:1px;padding:0 4px;border-radius:3px;cursor:pointer;background:#2b5fd9;color:#fff;font-size:11px}' + P_ + ' .plan .ch.x{background:#ddd;color:#888;text-decoration:line-through}' + P_ + ' .plan .rows{margin-top:3px;color:#333}' +
     P_ + ' .hint{font-size:11px;color:#777}' +
     P_ + ' .log{margin-top:8px;max-height:200px;overflow:auto;background:#f5f7fb;border-radius:4px;padding:6px;font-size:12px;white-space:pre-wrap}' +
     P_ + ' .choose{margin-top:8px;border:2px solid #f0a020;border-radius:6px;padding:8px;background:#fff8e8}' +
@@ -132,6 +133,7 @@
     '<div class="sec"><h4>이번 신청</h4>' +
     '<label class="t">근무상황</label><select data-k="type">' + TYPES.map(function (x, i) { return '<option value="' + i + '">' + x[2] + '</option>'; }).join('') + '</select>' +
     '<label class="t">날짜</label><div class="row"><input type="date" data-k="d1" value="' + today + '"><span>~</span><input type="date" data-k="d2" value="' + today + '"></div>' +
+    '<label class="inl" style="display:block;margin-top:4px"><input type="checkbox" data-k="split" checked> 주말·공휴일·휴업일 빼고 나누기</label><div data-k="plan" class="plan"></div>' +
     '<label class="t">시간 <span class="hint">(5분 단위)</span></label><div class="row"><input type="time" step="300" data-k="t1" value="13:00"><span>~</span><input type="time" step="300" data-k="t2" value="' + WORK_END + '"></div>' +
     '<div data-k="avbox" style="display:none"><label class="t">연가사유</label><select data-k="av">' + AV_RSN.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + '</option>'; }).join('') + '</select></div>' +
     '<div data-k="rsnbox"><label class="t">사유</label><input type="text" data-k="rsn" placeholder="예: 병원진료"></div>' +
@@ -260,6 +262,69 @@
   }
 
   /* ---------- 실행 ---------- */
+  /* ---- split a date range into rows (skip weekends, holidays, school closure days) ---- */
+  var calCache = {}, overrides = {}, planKey = '';
+  function ds(dt) { return dt.getFullYear() + pad(dt.getMonth() + 1) + pad(dt.getDate()); }
+  function pd(s8) { return new Date(+s8.slice(0, 4), +s8.slice(4, 6) - 1, +s8.slice(6, 8)); }
+  async function loadMonths(months) {
+    var need = months.filter(function (m) { return !(m in calCache); });
+    if (!need.length) return true;
+    var a = app('Dashboard3'); if (!a || !a.lookup('subSchedule')) return false;
+    var sub = a.lookup('subSchedule'), dm = a.lookup('dmBase'), di = a.lookup('dsItem'), old = dm.getValue('strDate'), okAll = true;
+    for (var i = 0; i < need.length; i++) {
+      var ym = need[i]; dm.setValue('strDate', ym + '01'); di.clear();
+      try { sub.send(); } catch (e) { okAll = false; break; }
+      var got = false;
+      for (var k = 0; k < 40; k++) { await sleep(250); for (var r0 = 0; r0 < di.getRowCount(); r0++) if (String(di.getValue(r0, 'itemDate')).indexOf(ym) === 0) { got = true; break; } if (got) break; }
+      if (!got) { okAll = false; break; }
+      var map = {};
+      for (var r = 0; r < di.getRowCount(); r++) {
+        var x = di.getRowData(r), dt = String(x.itemDate), nm = String(x.itemNm || '');
+        if (dt.indexOf(ym) !== 0 || x.itemDivCd !== '1') continue;
+        var off = (x.nathoYn === 'Y' || /휴업일/.test(nm)) && !/토요휴업일/.test(nm);
+        if (off) { if (!map[dt]) map[dt] = []; if (nm && !/방학/.test(nm)) map[dt].push(nm); }
+      }
+      calCache[ym] = map;
+    }
+    dm.setValue('strDate', old); try { di.clear(); sub.send(); } catch (e) { }
+    return okAll;
+  }
+  async function getPlan() {
+    var a = ymd(q('d1').value), b = ymd(q('d2').value);
+    if (!a || !b || b < a) return { segs: [], days: [], err: '' };
+    if (!q('split').checked || a === b) return { segs: [{ from: a, to: b, n: 0 }], days: null };
+    var key = a + b; if (key !== planKey) { overrides = {}; planKey = key; }
+    var dates = []; for (var dt = pd(a); ds(dt) <= b; dt.setDate(dt.getDate() + 1)) { dates.push(ds(dt)); if (dates.length > 120) return { segs: [], days: [], err: '기간은 120일까지만 나눌 수 있어요.' }; }
+    var months = []; dates.forEach(function (d) { var m = d.slice(0, 6); if (months.indexOf(m) < 0) months.push(m); });
+    var calOk = await loadMonths(months);
+    var days = dates.map(function (d) {
+      var w = pd(d).getDay(), hol = (calCache[d.slice(0, 6)] || {})[d];
+      var why = (w === 0 || w === 6) ? '주말' : hol ? (hol.join(', ') || 'holiday') : '';
+      var skip = (d in overrides) ? !overrides[d] : !!why;
+      return { d: d, why: why, skip: skip, std: !why };
+    });
+    var segs = [], cur = null;
+    days.forEach(function (x) { if (x.skip) { cur = null; return; } if (!cur) { cur = { from: x.d, to: x.d, n: 0, all: true }; segs.push(cur); } cur.to = x.d; if (x.std) cur.n++; else cur.all = false; });
+    segs.forEach(function (sg) { if (!sg.all) sg.n = 0; });
+    return { segs: segs, days: days, warn: calOk ? '' : '학사일정을 못 읽어서 주말만 뺐어요. 공휴일은 날짜를 눌러 빼 주세요.' };
+  }
+  var planTm = null;
+  function renderPlan() {
+    clearTimeout(planTm);
+    planTm = setTimeout(async function () {
+      var box = q('plan');
+      if (!q('split').checked || q('d1').value === q('d2').value) { box.innerHTML = ''; return; }
+      box.textContent = '학사일정 확인 중...';
+      var pl = await getPlan();
+      if (pl.err) { box.textContent = pl.err; return; }
+      if (!pl.days) { box.innerHTML = ''; return; }
+      var h = pl.days.map(function (x) { return '<span class="ch' + (x.skip ? ' x' : '') + '" data-d="' + x.d + '" title="' + (x.why || '') + '">' + (+x.d.slice(4, 6)) + '/' + (+x.d.slice(6)) + '</span>'; }).join('');
+      var tot = 0, rows = pl.segs.map(function (sg, i) { tot += sg.n; return '행 ' + (i + 1) + ': ' + (+sg.from.slice(4, 6)) + '/' + (+sg.from.slice(6)) + (sg.to !== sg.from ? ' ~ ' + (+sg.to.slice(4, 6)) + '/' + (+sg.to.slice(6)) : '') + (sg.n ? ' (' + sg.n + ' 일)' : ''); });
+      box.innerHTML = h + '<div class="rows">' + (rows.length ? rows.join('<br>') + '<br>합계 ' + tot + ' 일' : '신청할 날이 없어요.') + '</div><div class="hint">' + (pl.warn ? pl.warn + ' ' : '') + '날짜를 누르면 빼거나 다시 넣어요.</div>';
+      Array.prototype.forEach.call(box.querySelectorAll('.ch'), function (c) { c.onclick = function () { var d = c.getAttribute('data-d'); overrides[d] = c.classList.contains('x'); renderPlan(); }; });
+    }, 250);
+  }
+  ['d1', 'd2', 'split'].forEach(function (k) { q(k).addEventListener('change', renderPlan); });
   goBtn.onclick = function () {
     goBtn.disabled = true; logEl.textContent = ''; q('choose').style.display = 'none';
     run().then(function () { goBtn.disabled = false; }, function (e) { log('중단: ' + e.message); goBtn.disabled = false; });
@@ -283,7 +348,7 @@
       var other = c.getItems().filter(function (x) { return x.value !== value; })[0];
       if (other) { c.selectItemByValue(other.value); await sleep(400); }
     }
-    c.selectItemByValue(value); await sleep(600);
+    for (var st = 0; st < 4; st++) { c.selectItemByValue(value); await sleep(700); if (c.value === value) { await sleep(500); if (c.value === value) break; } }
     if (c.value !== value) throw new Error('선택 실패: ' + value);
   }
 
@@ -378,8 +443,12 @@
     if (+m1 % 5 || +m2 % 5) throw new Error('분은 5분 단위만 가능해요.');
     if (readAlert()) throw new Error('나이스 알림창이 떠 있어요. 먼저 닫아 주세요.');
     if (app('srv_mymmm00_p00')) throw new Error('근무상황신청 창이 이미 열려 있어요. 닫고 다시 시작해 주세요.');
+    var plan = await getPlan();
+    if (plan.err) throw new Error('나눌 날짜 확인 실패: ' + plan.err);
+    var segs = plan.segs;
+    if (!segs.length) throw new Error('신청할 날이 없어요.');
     if (autoSubmit) {
-      var sumTxt = ty[2] + '\n' + d1 + (d2 !== d1 ? ' ~ ' + d2 : '') + ' ' + t1 + ' ~ ' + t2 + '\n사유: ' + (isAv ? q('av').selectedOptions[0].text : rsn) + '\n결재선: ' + lineSummary(cfg);
+      var sumTxt = ty[2] + '\n' + d1 + (d2 !== d1 ? ' ~ ' + d2 : '') + ' ' + t1 + ' ~ ' + t2 + '\n사유: ' + (isAv ? q('av').selectedOptions[0].text : rsn) + '\n결재선: ' + lineSummary(cfg) + (segs.length > 1 ? '\n행: ' + segs.map(function (s) { return s.from.slice(4, 6) + '/' + s.from.slice(6) + '~' + s.to.slice(4, 6) + '/' + s.to.slice(6); }).join(', ') : '');
       if (!window.confirm('확인창 없이 바로 상신합니다.\n\n' + sumTxt + '\n\n진행할까요?')) throw new Error('취소했어요.');
     }
     persist();
@@ -399,34 +468,48 @@
     }
     await sleep(500);
 
-    log('2/6 입력 중: ' + ty[2]);
-    await selectCombo(P.lookup('cmbWorkSittnLclfCd'), ty[0]);
-    await selectCombo(P.lookup('cmbWorkSittnSclfCd'), ty[1]);
-    for (var nn = 0; nn < 5; nn++) {
-      await sleep(400);
-      var nm = readAlert(); if (!nm) break;
-      log('   안내: ' + nm);
-      dismissAlert(); await sleep(500);
-      if (/대상자가 아닙니다|대상자가 아님/.test(nm)) throw new Error('신청 대상이 아니라고 나와요: ' + nm);
+    log('2/6 입력 중: ' + ty[2] + (segs.length > 1 ? ' (' + segs.length + '개 행)' : ''));
+    var D = P.lookup('dsMain'), dest = DEST_TYPES.indexOf(ty[1]) >= 0 ? q('dest').value.trim() : '';
+    var fullDay = t1 === WORK_START && t2 === WORK_END;
+    for (var si = 0; si < segs.length; si++) {
+      var sg = segs[si];
+      if (si > 0) {
+        var nBefore = D.getRowCount();
+        P.lookup('btnRowAdd').click();
+        await waitFor(function () { return D.getRowCount() > nBefore; }, 8000, '행추가');
+        await sleep(700);
+      }
+      var ri = si;   // rows are appended in order
+      await selectCombo(P.lookup('cmbWorkSittnLclfCd'), ty[0]);
+      await selectCombo(P.lookup('cmbWorkSittnSclfCd'), ty[1]);
+      for (var nn = 0; nn < 5; nn++) {
+        await sleep(400);
+        var nm = readAlert(); if (!nm) break;
+        if (si === 0) log('   안내: ' + nm);
+        dismissAlert(); await sleep(500);
+        if (/대상자가 아닙니다|대상자가 아님/.test(nm)) throw new Error('신청 대상이 아니라고 나와요: ' + nm);
+      }
+      P.lookup('dtiWorkYmdFrom').putValue(sg.from); P.lookup('dtiWorkYmdTo').putValue(sg.to);
+      P.lookup('cmbBgngH').putValue(h1); P.lookup('cmbBgngM').putValue(m1);
+      P.lookup('cmbEndH').putValue(h2); P.lookup('cmbEndM').putValue(m2);
+      P.lookup('mse1').putValue(cfg.phone);
+      if (isAv) P.lookup('cmbAvRsnCd').selectItemByValue(av); else P.lookup('ipbWorkSittnRsnCn').putValue(rsn);
+      if (dest && P.lookup('ipbDestiNm')) P.lookup('ipbDestiNm').putValue(dest);
+      P.lookup('cbxPrdYn').putValue(cfg.hidePeriod ? 'Y' : 'N');
+      P.lookup('cbxWorkSittnRsnCnYn').putValue(cfg.hideReason ? 'Y' : 'N');
+      await sleep(600);
+      // NEIS recalculates 일수 only when a time changes, not when dates change
+      var ehc = P.lookup('cmbEndH'); ehc.putValue(h2 === '15' ? '14' : '15'); await sleep(900); ehc.putValue(h2); await sleep(1300);
+      var g = function (c) { return D.getValue(ri, c); }, bad = [];
+      if (g('workSittnSclfCd') !== ty[1]) bad.push('근무상황');
+      if (g('bgngYmd') !== sg.from || g('endYmd') !== sg.to) bad.push('날짜');
+      if (g('bgngH') !== h1 || g('bgngM') !== m1 || g('endH') !== h2 || g('endM') !== m2) bad.push('시간');
+      if (isAv ? g('avRsnCd') !== av : g('workSittnRsnCn') !== rsn) bad.push('사유');
+      if (dest && g('destiNm') !== dest) bad.push('목적지');
+      if (fullDay && sg.n && +g('workSittnDdTtl') !== sg.n) bad.push('일수(나이스 ' + g('workSittnDdTtl') + '일, 예상 ' + sg.n + '일)');
+      if (bad.length) throw new Error('입력 확인 실패: ' + bad.join(', '));
+      log('   ' + (si + 1) + '행 ' + sg.from.slice(4, 6) + '/' + sg.from.slice(6) + (sg.to !== sg.from ? '~' + sg.to.slice(4, 6) + '/' + sg.to.slice(6) : '') + ' → ' + g('workSittnDdTtl') + '일 ' + g('workSittnHrTtl') + '시간 ' + g('workSittnMTtl') + '분');
     }
-    P.lookup('dtiWorkYmdFrom').putValue(ymd(d1)); P.lookup('dtiWorkYmdTo').putValue(ymd(d2));
-    P.lookup('cmbBgngH').putValue(h1); P.lookup('cmbBgngM').putValue(m1);
-    P.lookup('cmbEndH').putValue(h2); P.lookup('cmbEndM').putValue(m2);
-    P.lookup('mse1').putValue(cfg.phone);
-    if (isAv) P.lookup('cmbAvRsnCd').selectItemByValue(av); else P.lookup('ipbWorkSittnRsnCn').putValue(rsn);
-    var dest = DEST_TYPES.indexOf(ty[1]) >= 0 ? q('dest').value.trim() : '';
-    if (dest && P.lookup('ipbDestiNm')) P.lookup('ipbDestiNm').putValue(dest);
-    P.lookup('cbxPrdYn').putValue(cfg.hidePeriod ? 'Y' : 'N');
-    P.lookup('cbxWorkSittnRsnCnYn').putValue(cfg.hideReason ? 'Y' : 'N');
-    await sleep(1200);
-    var D = P.lookup('dsMain'), g = function (c) { return D.getValue(0, c); }, bad = [];
-    if (g('workSittnSclfCd') !== ty[1]) bad.push('근무상황');
-    if (g('bgngYmd') !== ymd(d1) || g('endYmd') !== ymd(d2)) bad.push('날짜');
-    if (g('bgngH') !== h1 || g('bgngM') !== m1 || g('endH') !== h2 || g('endM') !== m2) bad.push('시간');
-    if (isAv ? g('avRsnCd') !== av : g('workSittnRsnCn') !== rsn) bad.push('사유');
-    if (dest && D.getValue(0, 'destiNm') !== dest) bad.push('목적지');
-    if (bad.length) throw new Error('입력 확인 실패: ' + bad.join(', '));
-    log('   신청시간 ' + g('workSittnDdTtl') + '일 ' + g('workSittnHrTtl') + '시간 ' + g('workSittnMTtl') + '분');
 
     log('3/6 승인요청...');
     P.lookup('btnAprvDmnd').click();

@@ -1,11 +1,11 @@
-/* NEIS Leave Request Helper (English) v1.8  — based on 근무상황 신청 도우미 v2.1
+/* NEIS Leave Request Helper (English) v1.9  — based on 근무상황 신청 도우미 v2.1
  * 복무 > 개인근무상황관리 > 신청 → fill → 승인요청 → approval line → 상신
  * Default: stops at the "상신하겠습니까?" confirm box. "Submit directly" clicks 확인 too (asks first).
  * Settings are saved in this browser only when "Remember on this PC" is checked.
  */
 (function () {
   'use strict';
-  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.8';
+  var PANEL_ID = 'neis-gm-helper-en', STORE = 'neisLeaveHelperEn.v1', VER = 'v1.9';
 
   /* Approver choices come from the bookmark (window.NEIS_LEAVE_CFG), so no names live in this public file.
    * e.g. { reviewers:[{name:'홍길동',role:'Teacher',on:true}], finals:[{name:'김교장',role:'Principal',on:true}] } */
@@ -144,6 +144,7 @@
     P_ + ' .go{margin-top:6px;width:100%;padding:8px;background:#2b5fd9;color:#fff;border:0;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer}' +
     P_ + ' .go:disabled{background:#999}' +
     P_ + ' .sm{padding:2px 8px;font-size:12px;border:1px solid #bbb;background:#fff;border-radius:4px;cursor:pointer}' +
+    P_ + ' .plan{margin-top:4px;font-size:12px}' + P_ + ' .plan .ch{display:inline-block;margin:1px;padding:0 4px;border-radius:3px;cursor:pointer;background:#2b5fd9;color:#fff;font-size:11px}' + P_ + ' .plan .ch.x{background:#ddd;color:#888;text-decoration:line-through}' + P_ + ' .plan .rows{margin-top:3px;color:#333}' +
     P_ + ' .hint{font-size:11px;color:#777;font-weight:normal}' +
     P_ + ' .log{margin-top:8px;max-height:200px;overflow:auto;background:#f5f7fb;border-radius:4px;padding:6px;font-size:12px;white-space:pre-wrap}';
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
@@ -182,6 +183,7 @@
     '<div class="sec"><h4>This request</h4>' +
     '<label class="t">Leave type</label><select data-k="type">' + TYPES.map(function (x, i) { return '<option value="' + i + '">' + x[2] + '</option>'; }).join('') + '</select>' +
     '<label class="t">Date</label><div class="row"><input type="date" data-k="d1" value="' + today + '"><span>~</span><input type="date" data-k="d2" value="' + today + '"></div>' +
+    '<label class="inl" style="display:block;margin-top:4px"><input type="checkbox" data-k="split" checked> Skip weekends, holidays and school closure days</label><div data-k="plan" class="plan"></div>' +
     '<label class="t">Time <span class="hint">(5-minute steps)</span></label><div class="row"><input type="time" step="300" data-k="t1" value="13:00"><span>~</span><input type="time" step="300" data-k="t2" value="' + WORK_END + '"></div>' +
     '<div data-k="avbox" style="display:none"><label class="t">Annual leave reason</label><select data-k="av">' + AV_RSN.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + '</option>'; }).join('') + '</select></div>' +
     '<div data-k="rsnbox"><label class="t">Reason</label><input type="text" data-k="rsn" placeholder="e.g. Hospital visit"></div>' +
@@ -324,6 +326,69 @@
   function persist() { if (q('remember').checked) saveCfg(currentCfg()); else clearCfg(); }
 
   /* ---------- Run ---------- */
+  /* ---- split a date range into rows (skip weekends, holidays, school closure days) ---- */
+  var calCache = {}, overrides = {}, planKey = '';
+  function ds(dt) { return dt.getFullYear() + pad(dt.getMonth() + 1) + pad(dt.getDate()); }
+  function pd(s8) { return new Date(+s8.slice(0, 4), +s8.slice(4, 6) - 1, +s8.slice(6, 8)); }
+  async function loadMonths(months) {
+    var need = months.filter(function (m) { return !(m in calCache); });
+    if (!need.length) return true;
+    var a = app('Dashboard3'); if (!a || !a.lookup('subSchedule')) return false;
+    var sub = a.lookup('subSchedule'), dm = a.lookup('dmBase'), di = a.lookup('dsItem'), old = dm.getValue('strDate'), okAll = true;
+    for (var i = 0; i < need.length; i++) {
+      var ym = need[i]; dm.setValue('strDate', ym + '01'); di.clear();
+      try { sub.send(); } catch (e) { okAll = false; break; }
+      var got = false;
+      for (var k = 0; k < 40; k++) { await sleep(250); for (var r0 = 0; r0 < di.getRowCount(); r0++) if (String(di.getValue(r0, 'itemDate')).indexOf(ym) === 0) { got = true; break; } if (got) break; }
+      if (!got) { okAll = false; break; }
+      var map = {};
+      for (var r = 0; r < di.getRowCount(); r++) {
+        var x = di.getRowData(r), dt = String(x.itemDate), nm = String(x.itemNm || '');
+        if (dt.indexOf(ym) !== 0 || x.itemDivCd !== '1') continue;
+        var off = (x.nathoYn === 'Y' || /휴업일/.test(nm)) && !/토요휴업일/.test(nm);
+        if (off) { if (!map[dt]) map[dt] = []; if (nm && !/방학/.test(nm)) map[dt].push(nm); }
+      }
+      calCache[ym] = map;
+    }
+    dm.setValue('strDate', old); try { di.clear(); sub.send(); } catch (e) { }
+    return okAll;
+  }
+  async function getPlan() {
+    var a = ymd(q('d1').value), b = ymd(q('d2').value);
+    if (!a || !b || b < a) return { segs: [], days: [], err: '' };
+    if (!q('split').checked || a === b) return { segs: [{ from: a, to: b, n: 0 }], days: null };
+    var key = a + b; if (key !== planKey) { overrides = {}; planKey = key; }
+    var dates = []; for (var dt = pd(a); ds(dt) <= b; dt.setDate(dt.getDate() + 1)) { dates.push(ds(dt)); if (dates.length > 120) return { segs: [], days: [], err: 'Splitting works for up to 120 days.' }; }
+    var months = []; dates.forEach(function (d) { var m = d.slice(0, 6); if (months.indexOf(m) < 0) months.push(m); });
+    var calOk = await loadMonths(months);
+    var days = dates.map(function (d) {
+      var w = pd(d).getDay(), hol = (calCache[d.slice(0, 6)] || {})[d];
+      var why = (w === 0 || w === 6) ? 'weekend' : hol ? (hol.join(', ') || 'holiday') : '';
+      var skip = (d in overrides) ? !overrides[d] : !!why;
+      return { d: d, why: why, skip: skip, std: !why };
+    });
+    var segs = [], cur = null;
+    days.forEach(function (x) { if (x.skip) { cur = null; return; } if (!cur) { cur = { from: x.d, to: x.d, n: 0, all: true }; segs.push(cur); } cur.to = x.d; if (x.std) cur.n++; else cur.all = false; });
+    segs.forEach(function (sg) { if (!sg.all) sg.n = 0; });
+    return { segs: segs, days: days, warn: calOk ? '' : 'Could not read the school calendar, so only weekends are skipped. Click a date to skip a holiday.' };
+  }
+  var planTm = null;
+  function renderPlan() {
+    clearTimeout(planTm);
+    planTm = setTimeout(async function () {
+      var box = q('plan');
+      if (!q('split').checked || q('d1').value === q('d2').value) { box.innerHTML = ''; return; }
+      box.textContent = 'Checking the school calendar...';
+      var pl = await getPlan();
+      if (pl.err) { box.textContent = pl.err; return; }
+      if (!pl.days) { box.innerHTML = ''; return; }
+      var h = pl.days.map(function (x) { return '<span class="ch' + (x.skip ? ' x' : '') + '" data-d="' + x.d + '" title="' + (x.why || '') + '">' + (+x.d.slice(4, 6)) + '/' + (+x.d.slice(6)) + '</span>'; }).join('');
+      var tot = 0, rows = pl.segs.map(function (sg, i) { tot += sg.n; return 'Row ' + (i + 1) + ': ' + (+sg.from.slice(4, 6)) + '/' + (+sg.from.slice(6)) + (sg.to !== sg.from ? ' ~ ' + (+sg.to.slice(4, 6)) + '/' + (+sg.to.slice(6)) : '') + (sg.n ? ' (' + sg.n + ' day(s))' : ''); });
+      box.innerHTML = h + '<div class="rows">' + (rows.length ? rows.join('<br>') + '<br>Total ' + tot + ' day(s)' : 'No working days in this period.') + '</div><div class="hint">' + (pl.warn ? pl.warn + ' ' : '') + 'Click a date to skip it or add it back.</div>';
+      Array.prototype.forEach.call(box.querySelectorAll('.ch'), function (c) { c.onclick = function () { var d = c.getAttribute('data-d'); overrides[d] = c.classList.contains('x'); renderPlan(); }; });
+    }, 250);
+  }
+  ['d1', 'd2', 'split'].forEach(function (k) { q(k).addEventListener('change', renderPlan); });
   goBtn.onclick = function () {
     goBtn.disabled = true; logEl.textContent = '';
     hookConfirm(log);
@@ -348,7 +413,7 @@
       var other = c.getItems().filter(function (x) { return x.value !== value; })[0];
       if (other) { c.selectItemByValue(other.value); await sleep(400); }
     }
-    c.selectItemByValue(value); await sleep(600);
+    for (var st = 0; st < 4; st++) { c.selectItemByValue(value); await sleep(700); if (c.value === value) { await sleep(500); if (c.value === value) break; } }
     if (c.value !== value) throw new Error('Could not select: ' + value);
   }
 
@@ -431,8 +496,12 @@
     if (+m1 % 5 || +m2 % 5) throw new Error('Minutes must be in 5-minute steps.');
     if (readAlert()) throw new Error('A NEIS message box is open. Please close it first.');
     if (app('srv_mymmm00_p00')) throw new Error('The 근무상황신청 window is already open. Close it and try again.');
+    var plan = await getPlan();
+    if (plan.err) throw new Error('Date split check failed: ' + plan.err);
+    var segs = plan.segs;
+    if (!segs.length) throw new Error('No working days in this period.');
     if (autoSubmit) {
-      var sumTxt = ty[2] + '\n' + d1 + (d2 !== d1 ? ' ~ ' + d2 : '') + ' ' + t1 + ' ~ ' + t2 + '\nReason: ' + (isAv ? q('av').selectedOptions[0].text : rsn) + '\nApproval: ' + lineSummary(cfg);
+      var sumTxt = ty[2] + '\n' + d1 + (d2 !== d1 ? ' ~ ' + d2 : '') + ' ' + t1 + ' ~ ' + t2 + '\nReason: ' + (isAv ? q('av').selectedOptions[0].text : rsn) + '\nApproval: ' + lineSummary(cfg) + (segs.length > 1 ? '\nRows: ' + segs.map(function (s) { return s.from.slice(4, 6) + '/' + s.from.slice(6) + '~' + s.to.slice(4, 6) + '/' + s.to.slice(6); }).join(', ') : '');
       if (!nativeConfirm.call(window, 'This will SUBMIT without stopping at the confirm box.\n\n' + sumTxt + '\n\nContinue?')) throw new Error('Cancelled.');
     }
     persist();
@@ -453,34 +522,48 @@
     }
     await sleep(500);
 
-    log('2/6 Filling in: ' + ty[2]);
-    await selectCombo(P.lookup('cmbWorkSittnLclfCd'), ty[0]);
-    await selectCombo(P.lookup('cmbWorkSittnSclfCd'), ty[1]);
-    for (var nn = 0; nn < 5; nn++) {
-      await sleep(400);
-      var nm = readAlert(); if (!nm) break;
-      log('   NEIS notice (Korean): ' + nm);
-      dismissAlert(); await sleep(500);
-      if (/대상자가 아닙니다|대상자가 아님/.test(nm)) throw new Error('NEIS says you are not eligible for this leave type (Korean): ' + nm);
+    log('2/6 Filling in: ' + ty[2] + (segs.length > 1 ? ' (' + segs.length + ' rows)' : ''));
+    var D = P.lookup('dsMain'), dest = DEST_TYPES.indexOf(ty[1]) >= 0 ? q('dest').value.trim() : '';
+    var fullDay = t1 === WORK_START && t2 === WORK_END;
+    for (var si = 0; si < segs.length; si++) {
+      var sg = segs[si];
+      if (si > 0) {
+        var nBefore = D.getRowCount();
+        P.lookup('btnRowAdd').click();
+        await waitFor(function () { return D.getRowCount() > nBefore; }, 8000, 'row add');
+        await sleep(700);
+      }
+      var ri = si;   // rows are appended in order
+      await selectCombo(P.lookup('cmbWorkSittnLclfCd'), ty[0]);
+      await selectCombo(P.lookup('cmbWorkSittnSclfCd'), ty[1]);
+      for (var nn = 0; nn < 5; nn++) {
+        await sleep(400);
+        var nm = readAlert(); if (!nm) break;
+        if (si === 0) log('   NEIS notice (Korean): ' + nm);
+        dismissAlert(); await sleep(500);
+        if (/대상자가 아닙니다|대상자가 아님/.test(nm)) throw new Error('NEIS says you are not eligible for this leave type (Korean): ' + nm);
+      }
+      P.lookup('dtiWorkYmdFrom').putValue(sg.from); P.lookup('dtiWorkYmdTo').putValue(sg.to);
+      P.lookup('cmbBgngH').putValue(h1); P.lookup('cmbBgngM').putValue(m1);
+      P.lookup('cmbEndH').putValue(h2); P.lookup('cmbEndM').putValue(m2);
+      P.lookup('mse1').putValue(cfg.phone);
+      if (isAv) P.lookup('cmbAvRsnCd').selectItemByValue(av); else P.lookup('ipbWorkSittnRsnCn').putValue(rsn);
+      if (dest && P.lookup('ipbDestiNm')) P.lookup('ipbDestiNm').putValue(dest);
+      P.lookup('cbxPrdYn').putValue(cfg.hidePeriod ? 'Y' : 'N');
+      P.lookup('cbxWorkSittnRsnCnYn').putValue(cfg.hideReason ? 'Y' : 'N');
+      await sleep(600);
+      // NEIS recalculates 일수 only when a time changes, not when dates change
+      var ehc = P.lookup('cmbEndH'); ehc.putValue(h2 === '15' ? '14' : '15'); await sleep(900); ehc.putValue(h2); await sleep(1300);
+      var g = function (c) { return D.getValue(ri, c); }, bad = [];
+      if (g('workSittnSclfCd') !== ty[1]) bad.push('leave type');
+      if (g('bgngYmd') !== sg.from || g('endYmd') !== sg.to) bad.push('date');
+      if (g('bgngH') !== h1 || g('bgngM') !== m1 || g('endH') !== h2 || g('endM') !== m2) bad.push('time');
+      if (isAv ? g('avRsnCd') !== av : g('workSittnRsnCn') !== rsn) bad.push('reason');
+      if (dest && g('destiNm') !== dest) bad.push('destination');
+      if (fullDay && sg.n && +g('workSittnDdTtl') !== sg.n) bad.push('days (NEIS ' + g('workSittnDdTtl') + ', expected ' + sg.n + ')');
+      if (bad.length) throw new Error('Input check failed: ' + bad.join(', '));
+      log('   Row ' + (si + 1) + ': ' + sg.from.slice(4, 6) + '/' + sg.from.slice(6) + (sg.to !== sg.from ? '~' + sg.to.slice(4, 6) + '/' + sg.to.slice(6) : '') + ' → ' + g('workSittnDdTtl') + ' day(s) ' + g('workSittnHrTtl') + ' h ' + g('workSittnMTtl') + ' min');
     }
-    P.lookup('dtiWorkYmdFrom').putValue(ymd(d1)); P.lookup('dtiWorkYmdTo').putValue(ymd(d2));
-    P.lookup('cmbBgngH').putValue(h1); P.lookup('cmbBgngM').putValue(m1);
-    P.lookup('cmbEndH').putValue(h2); P.lookup('cmbEndM').putValue(m2);
-    P.lookup('mse1').putValue(cfg.phone);
-    if (isAv) P.lookup('cmbAvRsnCd').selectItemByValue(av); else P.lookup('ipbWorkSittnRsnCn').putValue(rsn);
-    var dest = DEST_TYPES.indexOf(ty[1]) >= 0 ? q('dest').value.trim() : '';
-    if (dest && P.lookup('ipbDestiNm')) P.lookup('ipbDestiNm').putValue(dest);
-    P.lookup('cbxPrdYn').putValue(cfg.hidePeriod ? 'Y' : 'N');
-    P.lookup('cbxWorkSittnRsnCnYn').putValue(cfg.hideReason ? 'Y' : 'N');
-    await sleep(1200);
-    var D = P.lookup('dsMain'), g = function (c) { return D.getValue(0, c); }, bad = [];
-    if (g('workSittnSclfCd') !== ty[1]) bad.push('leave type');
-    if (g('bgngYmd') !== ymd(d1) || g('endYmd') !== ymd(d2)) bad.push('date');
-    if (g('bgngH') !== h1 || g('bgngM') !== m1 || g('endH') !== h2 || g('endM') !== m2) bad.push('time');
-    if (isAv ? g('avRsnCd') !== av : g('workSittnRsnCn') !== rsn) bad.push('reason');
-    if (dest && D.getValue(0, 'destiNm') !== dest) bad.push('destination');
-    if (bad.length) throw new Error('Input check failed: ' + bad.join(', '));
-    log('   Requested time: ' + g('workSittnDdTtl') + ' day(s) ' + g('workSittnHrTtl') + ' h ' + g('workSittnMTtl') + ' min');
 
     log('3/6 승인요청 (request approval)...');
     stage = 'aprv';
